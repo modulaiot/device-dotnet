@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Configuration.FileExtensions;
-using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.Logging;
 using ModulaIOT.Device.Models;
 using ModulaIOT.Device.Modules;
 
@@ -11,44 +9,53 @@ using System.Net.Http;
 
 namespace ModulaIOT.Device
 {
+    public interface IDeviceConfiguration
+    {
+        string SettingsPath { get; set; }
+    }
+
+    public class DeviceConfiguration : IDeviceConfiguration
+    {
+        public string SettingsPath { get; set; }
+    }
+
     public class ModulaIOTDeviceBuilder
     {
-        private Action<IServiceCollection> ConfigureServicesFunc;
+        private Action<IServiceCollection> _configureServices;
 
-        private string ConfigPath { get; }
+        private Action<IDeviceConfiguration> _configureConfig;
 
-
-        public ModulaIOTDeviceBuilder(string configPath = "settings.json")
+        private readonly DeviceConfiguration _config = new DeviceConfiguration
         {
-            ConfigPath = configPath;
+            SettingsPath = "settings.json"
+        };
 
-
-            // ModuleSettings.Register<CoreSettings>("CoreSettings");
-
-            // ServiceProvider.GetServices()
-
-            // var settings = ServiceProvider.GetService<ISettings>();
-            // var coreConfig = settings.Get<CoreSettings>("Test");
-            // Console.WriteLine("CoreConfig: " + coreConfig.TestParam);
-            // this.configPath = configPath;
+        public ModulaIOTDeviceBuilder()
+        {
         }
 
         public ModulaIOTDevice Build()
         {
+            // User Config
+            if (_configureConfig != null) _configureConfig(_config);
+
             // Register Services
             var services = new ServiceCollection()
-                .AddSingleton<IConfiguration>(new ConfigurationBuilder()
-                    .AddJsonFile(ConfigPath, true, true)
-                    .Build()
-                )
-                .AddSingleton<ISettings, Settings>();
+                .AddLogging(builder =>
+                {
+                    builder
+                        .AddConsole();
+                })
+                .AddSingleton<IDeviceConfiguration>(_config)
+                .AddSingleton<ISettings, Settings>()
+                .AddSingleton<IModules, Models.Modules>();
 
             // Register Main Modules
             services
-                .UseModule<CoreSettings>();
+                .UseModule<ICoreSettings, CoreSettings>(singleton: true);
 
             // Register User Services and Modules
-            if (ConfigureServicesFunc != null) ConfigureServicesFunc(services);
+            if (_configureServices != null) _configureServices(services);
 
             // Register Device
             services.AddSingleton<ModulaIOTDevice>();
@@ -56,39 +63,56 @@ namespace ModulaIOT.Device
             // Build Provider
             var provider = services.BuildServiceProvider();
 
-            // Load Settings
-            provider.GetService<ISettings>().Load();
-
             // Retrun Device Instance
             return provider.GetService<ModulaIOTDevice>();
         }
 
         public ModulaIOTDeviceBuilder ConfigureServices(Action<IServiceCollection> func)
         {
-            ConfigureServicesFunc = func;
+            _configureServices = func;
             return this;
         }
 
-
+        public ModulaIOTDeviceBuilder ConfigureConfig(Action<IDeviceConfiguration> func)
+        {
+            _configureConfig = func;
+            return this;
+        }
     }
 
-    public class ModulaIOTDevice
+    public class ModulaIOTDevice : ILoadable, IAsyncDisposable
     {
-        public ISettings Settings { get; }
+        public IModules Modules { get; }
+        public IServiceProvider Provider { get; }
 
-        public ModulaIOTDevice(ISettings settings)
+        public ModulaIOTDevice(IModules modules, ICoreSettings coreSettings, IServiceProvider provider)
         {
-            Settings = settings;
-            var core = settings.Get<CoreSettings>("Test");
-            Console.WriteLine("Core: " + core.TestParam);
+
+            Modules = modules;
+            Provider = provider;
         }
 
-        public async Task Run()
+        public async Task Load()
         {
+            // Load Modules
+            await Modules.Load();
+
+
             var client = new HttpClient();
             var res = await client.GetAsync("http://localhost:5000/api/device/get");
             Console.WriteLine(await res.Content.ReadAsStringAsync());
+
         }
 
+        public async Task Save()
+        {
+            // Save Modules
+            await Modules.Save();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Save();
+        }
     }
 }

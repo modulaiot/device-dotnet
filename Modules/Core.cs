@@ -4,24 +4,17 @@ using ModulaIOT.Device.Models;
 
 namespace ModulaIOT.Device.Modules
 {
-    public interface ICoreModule : IModule
+    public interface ICoreSettings : IModule
     {
         string TestParam { get; set; }
     }
-    public class CoreSettings : IModule, ICoreModule
+    public class CoreSettings : Module, ICoreSettings
     {
-        public string TestParam { get; set; }
-        public string Id { get; set; }
-        public string Name { get; set; }
+        public string TestParam { get => Settings["TestParam"] as string; set => Settings["TestParam"] = value; }
 
         public CoreSettings(ISettings settings)
         {
 
-        }
-
-        public Task Run()
-        {
-            throw new NotImplementedException();
         }
     }
 }
