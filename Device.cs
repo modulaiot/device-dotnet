@@ -5,114 +5,69 @@ using Microsoft.Extensions.Logging;
 using ModulaIOT.Device.Models;
 using ModulaIOT.Device.Modules;
 
-using System.Net.Http;
 
 namespace ModulaIOT.Device
 {
-    public interface IDeviceConfiguration
+    public class DeviceBuilder
     {
-        string SettingsPath { get; set; }
-    }
+        private ModuleProvider _provider;
+        private Action<IModuleProvider>? _with;
+        private Action<IConfiguration>? _withConfiguration;
 
-    public class DeviceConfiguration : IDeviceConfiguration
-    {
-        public string SettingsPath { get; set; }
-    }
-
-    public class ModulaIOTDeviceBuilder
-    {
-        private Action<IServiceCollection> _configureServices;
-
-        private Action<IDeviceConfiguration> _configureConfig;
-
-        private readonly DeviceConfiguration _config = new DeviceConfiguration
+        public DeviceBuilder()
         {
-            SettingsPath = "settings.json"
-        };
-
-        public ModulaIOTDeviceBuilder()
-        {
+            _provider = new ModuleProvider();
         }
 
         public ModulaIOTDevice Build()
         {
-            // User Config
-            if (_configureConfig != null) _configureConfig(_config);
+            _provider.Register<Controller>("ControllerModule");
 
-            // Register Services
-            var services = new ServiceCollection()
-                .AddLogging(builder =>
-                {
-                    builder
-                        .AddConsole();
-                })
-                .AddSingleton<IDeviceConfiguration>(_config)
-                .AddSingleton<ISettings, Settings>()
-                .AddSingleton<IModules, Models.Modules>();
+            _provider.Add<Configuration>("Configuration");
+            _provider.Add<FileSettings>("FileSettings");
+            _provider.Add<Loader>("Loader");
 
-            // Register Main Modules
-            services
-                .UseModule<ICoreSettings, CoreSettings>(singleton: true);
+            if (_with != null)
+            {
+                _with(_provider);
+            }
+            if (_withConfiguration != null)
+            {
+                _withConfiguration(_provider.Get<IConfiguration>("Configuration"));
+            }
 
-            // Register User Services and Modules
-            if (_configureServices != null) _configureServices(services);
-
-            // Register Device
-            services.AddSingleton<ModulaIOTDevice>();
-
-            // Build Provider
-            var provider = services.BuildServiceProvider();
-
-            // Retrun Device Instance
-            return provider.GetService<ModulaIOTDevice>();
+            return new ModulaIOTDevice(_provider);
         }
 
-        public ModulaIOTDeviceBuilder ConfigureServices(Action<IServiceCollection> func)
+        public void With(Action<IModuleProvider> fn)
         {
-            _configureServices = func;
-            return this;
+            _with = fn;
         }
-
-        public ModulaIOTDeviceBuilder ConfigureConfig(Action<IDeviceConfiguration> func)
+        public void WithConfiguration(Action<IConfiguration> fn)
         {
-            _configureConfig = func;
-            return this;
+            _withConfiguration = fn;
         }
     }
 
-    public class ModulaIOTDevice : ILoadable, IAsyncDisposable
+    public class ModulaIOTDevice
     {
-        public IModules Modules { get; }
-        public IServiceProvider Provider { get; }
+        private readonly IModuleProvider _provider;
+        private readonly IModule _loader;
 
-        public ModulaIOTDevice(IModules modules, ICoreSettings coreSettings, IServiceProvider provider)
+        public ModulaIOTDevice(IModuleProvider provider)
         {
-
-            Modules = modules;
-            Provider = provider;
+            _provider = provider;
+            _loader = _provider.Get("Loader");
         }
 
-        public async Task Load()
+        public async Task Run()
         {
-            // Load Modules
-            await Modules.Load();
+            await _loader.Use();
+            var controller = _provider.Get<IController>("Controller");
+            await controller.Use();
 
-
-            var client = new HttpClient();
-            var res = await client.GetAsync("http://localhost:5000/api/device/get");
-            Console.WriteLine(await res.Content.ReadAsStringAsync());
-
-        }
-
-        public async Task Save()
-        {
-            // Save Modules
-            await Modules.Save();
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await Save();
+            await controller.Release();
+            await _loader.Release();
         }
     }
 }
