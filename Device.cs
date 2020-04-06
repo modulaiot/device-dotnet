@@ -1,73 +1,86 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using ModulaIOT.Device.Models;
-using ModulaIOT.Device.Modules;
-
 
 namespace ModulaIOT.Device
 {
     public class DeviceBuilder
     {
-        private ModuleProvider _provider;
-        private Action<IModuleProvider>? _with;
-        private Action<IConfiguration>? _withConfiguration;
+
+        private ServiceCollection _services;
 
         public DeviceBuilder()
         {
-            _provider = new ModuleProvider();
+            _services = new ServiceCollection();
         }
 
-        public ModulaIOTDevice Build()
+        public IDeviceModule Build()
         {
-            _provider.Register<Controller>("ControllerModule");
+            _services.AddSingleton<IDeviceModule, DeviceModule>();
 
-            _provider.Add<Configuration>("Configuration");
-            _provider.Add<FileSettings>("FileSettings");
-            _provider.Add<Loader>("Loader");
-
-            if (_with != null)
-            {
-                _with(_provider);
-            }
-            if (_withConfiguration != null)
-            {
-                _withConfiguration(_provider.Get<IConfiguration>("Configuration"));
-            }
-
-            return new ModulaIOTDevice(_provider);
+            return _services
+                .BuildServiceProvider()
+                .GetService<IDeviceModule>();
         }
-
-        public void With(Action<IModuleProvider> fn)
+        public DeviceBuilder ConfigureDefaults()
         {
-            _with = fn;
+            _services
+                .AddLogging(builder =>
+                {
+                    builder.AddConsole();
+                })
+                .AddConfiguration(builder =>
+                {
+                    builder
+                        .AddDefaultConfiguration()
+                        .AddWriteableJsonFile("settings.json");
+                })
+                .AddModuleLifetime()
+                .AddController();
+            // .AddTemperature(builder =>
+            // {
+            //     builder.AddBme280();
+            // });
+            // .AddReporter(reporterBuilder =>
+            // {
+            //     reporterBuilder.AddHomeassistant();
+            // })
+
+            return this;
         }
-        public void WithConfiguration(Action<IConfiguration> fn)
-        {
-            _withConfiguration = fn;
-        }
+
+
     }
 
-    public class ModulaIOTDevice
-    {
-        private readonly IModuleProvider _provider;
-        private readonly IModule _loader;
 
-        public ModulaIOTDevice(IModuleProvider provider)
+    public interface IDeviceModule
+    {
+        string Id { get; }
+        string Name { get; }
+        Task Run();
+    }
+
+
+
+    public class DeviceModule : IDeviceModule
+    {
+        private readonly IConfiguration _config;
+
+        public string Id => _config["id"];
+        public string Name => _config["name"];
+
+        public DeviceModule(IConfiguration config, IModuleLifetime moduleLifetime, IController controller)
         {
-            _provider = provider;
-            _loader = _provider.Get("Loader");
+            _config = config;
         }
 
-        public async Task Run()
+        public Task Run()
         {
-            await _loader.Use();
-            var controller = _provider.Get<IController>("Controller");
-            await controller.Use();
-
-            await controller.Release();
-            await _loader.Release();
+            return Task.CompletedTask;
         }
     }
 }

@@ -1,31 +1,28 @@
 using System;
 using System.Threading.Tasks;
-using System.Net.Http;
-using ModulaIOT.Device.Models;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Configuration;
+using ModulaIOT.Device.Models;
 
-
-namespace ModulaIOT.Device.Modules
+namespace ModulaIOT.Device.Models
 {
+
     public interface IController : IModule
     {
         string Host { get; }
-        string Key { get; }
         bool Adopted { get; }
     }
 
-    public class Controller : ModuleSettings, IController
+    public class Controller : Module, IController
     {
         private readonly HubConnection _client;
-        private readonly IConfiguration _config;
-        public string Host { get => GetWithDefault<string>(_config.ControllerHost); private set => Set(value); } // fix with defaults ?
-        public string Key { get => GetWithDefault<string>(_config.ControllerKey); private set => Set(value); }
-        public bool Adopted { get => Get<bool>(); private set => Set(value); }
+        private string Key { get => _section["key"]; set => _section["key"] = value; }
 
+        public string Host => _section["host"];
+        public bool Adopted { get => _section.GetValue<bool>("adopted", false); set => _section.SetValue("adopted", value); }
 
-        public Controller(IModuleProvider provider, string id) : base(provider, id)
+        public Controller(string id, IConfiguration config) : base(id, config)
         {
-            _config = _provider.Get<IConfiguration>("Configuration");
             var url = new UriBuilder(Host);
             url.Path = "/device";
             _client = new HubConnectionBuilder()
@@ -33,20 +30,9 @@ namespace ModulaIOT.Device.Modules
                .Build();
         }
 
-        protected override async Task OnUse()
+        public override async Task Run()
         {
-            await base.OnUse();
-            await _config.Use();
-            await _client.StartAsync();
-            var result = await _client.InvokeAsync<string>("Inform", "Device");
-            if (!await Handshake()) throw new Exception("Could not handshake with server.");
-        }
-
-        protected override async Task OnRelease()
-        {
-            await _client.StopAsync();
-            await _config.Release();
-            await base.OnRelease();
+            await Handshake();
         }
 
         private async Task<bool> Handshake(int count = 0)
@@ -66,16 +52,18 @@ namespace ModulaIOT.Device.Modules
             }
         }
     }
+}
 
-    public static class InformApi
+
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class ControllerExtensions
     {
-        public class Request
+        public static IServiceCollection AddController(this IServiceCollection services)
         {
-            public string? Id { get; set; }
-        }
-        public class Response
-        {
-            public string? Key { get; set; }
+            // services.AddModuleConfig<IControllerConfiguration, ControllerConfiguration>();
+            services.AddModule<IController, Controller>("controller");
+            return services;
         }
     }
 }
