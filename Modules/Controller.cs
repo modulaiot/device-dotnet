@@ -11,15 +11,25 @@ namespace ModulaIOT.Device.Models
     {
         string Host { get; }
         bool Adopted { get; }
+        bool Connected { get; }
     }
 
     public class Controller : Module, IController
     {
         private readonly HubConnection _client;
-        private string Key { get => _section["key"]; set => _section["key"] = value; }
+        private string Key
+        {
+            get => _section["key"];
+            set => _section["key"] = value;
+        }
 
         public string Host => _section["host"];
-        public bool Adopted { get => _section.GetValue<bool>("adopted", false); set => _section.SetValue("adopted", value); }
+        public bool Adopted
+        {
+            get => _section.GetValue("adopted", false);
+            set => _section.SetValue("adopted", value);
+        }
+        public bool Connected => _client.State == HubConnectionState.Connected;
 
         public Controller(string id, IConfiguration config) : base(id, config)
         {
@@ -30,26 +40,21 @@ namespace ModulaIOT.Device.Models
                .Build();
         }
 
-        public override async Task Run()
+        public override async Task Run(IModuleLifetime lifetime)
         {
+            await _client.StartAsync();
             await Handshake();
+            await WaitUntilUnused();
+            await _client.StopAsync();
         }
 
         private async Task<bool> Handshake(int count = 0)
         {
-            try
-            {
-                if (Key != null) return true;
+            if (Adopted) return true;
 
-                var result = await _client.InvokeAsync<string>("Inform", "Device");
+            var result = await _client.InvokeAsync<string>("Inform", "Device");
 
-                return true;
-            }
-            catch
-            {
-                if (count < 5) return await Handshake(count + 1);
-                return false;
-            }
+            return true;
         }
     }
 }
@@ -61,7 +66,6 @@ namespace Microsoft.Extensions.DependencyInjection
     {
         public static IServiceCollection AddController(this IServiceCollection services)
         {
-            // services.AddModuleConfig<IControllerConfiguration, ControllerConfiguration>();
             services.AddModule<IController, Controller>("controller");
             return services;
         }

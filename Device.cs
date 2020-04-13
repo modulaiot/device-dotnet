@@ -69,18 +69,20 @@ namespace ModulaIOT.Device
     public class DeviceModule : IDeviceModule
     {
         private readonly IConfiguration _config;
+        private readonly IModuleLifetime _lifetime;
 
         public string Id => _config["id"];
         public string Name => _config["name"];
 
-        public DeviceModule(IConfiguration config, IModuleLifetime moduleLifetime, IController controller)
+        public DeviceModule(IConfiguration config, IModuleLifetime lifetime)
         {
             _config = config;
+            _lifetime = lifetime;
         }
 
         public Task Run()
         {
-            return Task.CompletedTask;
+            return _lifetime.Run();
         }
     }
 }
